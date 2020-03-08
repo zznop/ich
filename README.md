@@ -2,8 +2,8 @@
 
 ## Desciption
 
-ich (Instrumented Crash Harness) is a Linux crash harness that uses a combination of ptrace debugging and code
-injection techniques to instrument and monitor debuggee processes with the goal of detecting certain classes of bugs.
+ich is a Linux crash harness that uses a combination of ptrace debugging and code injection techniques to instrument
+and monitor debuggee processes with the goal of detecting certain classes of bugs.
 
 ## Building
 

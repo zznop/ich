@@ -1,7 +1,7 @@
 /**
  * main.c
  *
- * Copyright (C) 2018 zznop, zznop0x90@gmail.com
+ * Copyright (C) 2020 zznop, zznop0x90@gmail.com
  *
  * This software may be modified and distributed under the terms
  * of the MIT license.  See the LICENSE file for details.
@@ -25,13 +25,20 @@
 #include <sys/uio.h>
 #include "utils.h"
 
+////////////////////////////// PREPROCESSOR //////////////////////////////
+
 #define ELF_MAGIC 0x464c457f
-#define HOOK_LIB_PATH "/tmp/ich.so"
+#define HOOK_LIB_PATH "/tmp/libich.so"
+
+
+////////////////////////////// EXTERNALS /////////////////////////////////
 
 extern char **environ;
 extern uint8_t _hook_library[0];
 extern int _hook_library_size;
 static bool _continue = 1;
+
+////////////////////////////// TYPES  ////////////////////////////////////
 
 typedef enum {
     EXITED = 0,
@@ -39,13 +46,21 @@ typedef enum {
     UNKNOWN
 } estat_t;
 
+////////////////////////// END TYPES /////////////////////////////////////
+
+/**
+ * Drop libich.so to a tmp location
+ *
+ * @return 0 for success, 1 for failure
+ */
 static int init_crash_harness(void)
 {
     int nb, total_nb;
+    info("Dropping instrumentation library to %s ...", HOOK_LIB_PATH);
     FILE *hook_lib_file = fopen(HOOK_LIB_PATH, "wb");
     if (!hook_lib_file) {
         err("Failed to initialize crash harness\n");
-        return FAILURE;
+        return 1;
     }
 
     total_nb = 0;
@@ -58,14 +73,20 @@ static int init_crash_harness(void)
 
     if (total_nb != _hook_library_size) {
         err("Failed to write hook library to tmp directory\n");
-        return FAILURE;
+        return 1;
     }
 
     fclose(hook_lib_file);
     chmod(HOOK_LIB_PATH, 0700);
-    return SUCCESS;
+    return 0;
 }
 
+/**
+ * Resolve base address of the ELF that RIP is within
+ *
+ * @param pid Debugee process ID
+ * @param addr RIP address
+ */
 static void dump_elf_base(pid_t pid, uint64_t addr)
 {
     uint64_t qword;
@@ -84,6 +105,12 @@ static void dump_elf_base(pid_t pid, uint64_t addr)
     }
 }
 
+/**
+ * Dump virtual memory content
+ *
+ * @param pid Debuggee process ID
+ * @param addr Base address
+ */
 static void dump_reg_memory(pid_t pid, uint64_t addr)
 {
     uint8_t buf[16];
@@ -113,10 +140,14 @@ static void dump_reg_memory(pid_t pid, uint64_t addr)
         else
             printf(".");
     }
-
     printf("\n");
 }
 
+/**
+ * Display a crash dump
+ *
+ * @param pid Debuggee process ID
+ */
 static void display_crash_dump(pid_t pid)
 {
     struct user_regs_struct regs;
@@ -169,6 +200,13 @@ static void display_crash_dump(pid_t pid)
     );
 }
 
+/**
+ * Copies the default environment and adds a LD_PRELOAD line for the
+ * instrumentation library. Then, it starts and ptrace attaches to the
+ * debuggee.
+ *
+ * @param argv Argument values (the command line)
+ */
 static void spawn_process(char **argv)
 {
     char **env = NULL;
@@ -177,6 +215,7 @@ static void spawn_process(char **argv)
 
     memset(preload_env, '\0', sizeof(preload_env));
     snprintf(preload_env, sizeof(preload_env), "LD_PRELOAD=%s", HOOK_LIB_PATH);
+    info("Setting up the environment: %s", preload_env);
 
     /* Get count */
     while (environ[i] != NULL)
@@ -192,8 +231,9 @@ static void spawn_process(char **argv)
 
     /* Append LD_PRELOAD */
     env[i] = preload_env;
-    env[i + 1] = NULL;
+    env[i+1] = NULL;
 
+    info("Executing process (%s) ...\n", argv[0]);
     ptrace(PTRACE_TRACEME, 0, NULL, NULL);
     kill(getpid(), SIGSTOP);
     execve(argv[0], argv, env);
@@ -203,6 +243,12 @@ static void spawn_process(char **argv)
     exit(1);
 }
 
+/**
+ * Parse status integer
+ *
+ * @param status Status integer
+ * @return Integer representing crashed, exited, or unknown/unhandled status
+ */
 static estat_t status_type(int status)
 {
     if (WIFSTOPPED(status)) {
@@ -218,6 +264,12 @@ static estat_t status_type(int status)
     return UNKNOWN;
 }
 
+/**
+ * Wait on process and handle signals
+ *
+ * @param pid Debuggee process ID
+ * @return 1 if the process exited, 0 if it crashed
+ */
 static int monitor_execution(pid_t pid)
 {
     int ret = 1;
@@ -229,19 +281,29 @@ static int monitor_execution(pid_t pid)
         waitpid(pid, &status, 0);
 
         st = status_type(status);
-        if (st == CRASHED)
+        if (st == CRASHED) {
+            info("Process has exited");
             return 0;
+        }
 
-        if (st == EXITED)
+        if (st == EXITED) {
+            info("Process has crashed with SIGSEGV");
             return 1;
+        }
     }
-
     return ret;
 }
 
+/**
+ * Main
+ *
+ * @param argc Argument count
+ * @param argv Argument values
+ * @return 0 for success, 1 for failure
+ */
 int main(int argc, char **argv)
 {
-    int ret = FAILURE;
+    int ret = 1;
     int pid;
 
     if (argc < 2) {
@@ -258,13 +320,12 @@ int main(int argc, char **argv)
         spawn_process(&argv[1]);
     } else {
         if (!monitor_execution(pid)) {
-            info("Fuzzed process has crashed with SIGSEGV");
             display_crash_dump(pid);
         }
         ptrace(PTRACE_DETACH, pid, 0, 0);
     }
 
-    ret = SUCCESS;
+    ret = 0;
 done:
     return ret;
 }
