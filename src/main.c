@@ -282,12 +282,12 @@ static int monitor_execution(pid_t pid)
 
         st = status_type(status);
         if (st == CRASHED) {
-            info("Process has exited");
+            info("Process has crashed with SIGSEGV");
             return 0;
         }
 
         if (st == EXITED) {
-            info("Process has crashed with SIGSEGV");
+            info("Process has exited");
             return 1;
         }
     }
