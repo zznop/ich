@@ -1,4 +1,4 @@
-# ich
+# ich [![Build Status](https://travis-ci.org/zznop/ich.svg?branch=master)](https://travis-ci.org/zznop/ich)
 
 ## Desciption
 
